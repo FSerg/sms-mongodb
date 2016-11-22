@@ -50,14 +50,16 @@ var mongoose = require('mongoose');
 
 // MONGODB
 var smsSchema = new mongoose.Schema({
-		tel: { type: String, index: true },
-		text: String,
-		isSent: Boolean,
-        isOK: Boolean,
-        answer: String,
-        createdAt: { type: Date, index: true },
-        sentAt: Date
-	}, { strict: false });
+    tel: { type: String, index: true },
+    text: String,
+    doc_number: String,
+    doc_date: String,
+    isSent: Boolean,
+    isOK: Boolean,
+    answer: String,
+    createdAt: { type: Date, index: true },
+    sentAt: Date
+}, { strict: false });
 
 var SMS = mongoose.model('sms', smsSchema);
 
