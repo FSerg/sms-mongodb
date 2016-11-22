@@ -48,7 +48,7 @@ var form =  {
 
 var mongoose = require('mongoose');
 
-// MONGODB 
+// MONGODB
 var smsSchema = new mongoose.Schema({
 		tel: { type: String, index: true },
 		text: String,
@@ -165,9 +165,16 @@ function FindSMS(){
     // ищем список неотправленных СМСок
     SMS.find({isSent: false}, function (err, finded_sms, count ){
         async.eachSeries(finded_sms, function(my_sms, callback) {
-            console.log('sms - ' + my_sms._id); //only debug
-            callback(); //only debug
-            //SendSMS(my_sms, callback);
+
+            if (process.env.NODE_ENV === 'production') {
+                SendSMS(my_sms, callback);
+            }
+            else {
+                // for debugging
+                console.log('ready to send sms - ' + my_sms._id);
+                callback();
+            }
+
         }, function(err) {
             // if any of the file processing produced an error, err would equal that error
             if(err) {
