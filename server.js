@@ -46,9 +46,21 @@ var form =  {
     text: ''
 };
 
+var formBalance =  {
+    userName: config.sms_username,
+    password: config.sms_password
+};
+
 var mongoose = require('mongoose');
 
-// MONGODB
+// MONGODB Balance
+var balanceSchema = new mongoose.Schema({
+    updatedAt: { type: Date, index: true },
+    balance: Number
+}, { strict: false });
+var BALANCE = mongoose.model('balance', balanceSchema);
+
+// MONGODB SMS
 var smsSchema = new mongoose.Schema({
     tel: { type: String, index: true },
     text: String,
@@ -60,8 +72,8 @@ var smsSchema = new mongoose.Schema({
     createdAt: { type: Date, index: true },
     sentAt: Date
 }, { strict: false });
-
 var SMS = mongoose.model('sms', smsSchema);
+
 
 mongoose.Promise = global.Promise;
 mongoose.connect(config.MONGO_URL, function(err) {
@@ -101,6 +113,19 @@ mongoose.connection.on("connected", function(ref) {
 // app.get('/test', passport.authenticate('bearer', { session: false }), function(req, res) {
 //     res.send({result: 'Everithing ok :)'});
 // });
+
+app.get('/balance', passport.authenticate('bearer', { session: false }), function(req, res) {
+//app.get('/balance', function(req, res) {
+
+    UpdateBalance(function(error) {
+        if (error) {
+            res.status(404).send({result: error});
+        } else {
+            res.send({result: 'Balance updated :)'});
+        }
+    });
+
+});
 
 // POST method route
 app.post('/sms', passport.authenticate('bearer', { session: false }), function (req, res) {
@@ -153,15 +178,6 @@ app.post('/sms', passport.authenticate('bearer', { session: false }), function (
     });
 });
 
-//GET method route
-// app.get('/getsms', function(req, res) {
-//     res.send('ok');
-//     console.log('Start - ' + Date());
-//     cron.schedule('*/2 * * * *', function(){
-//         console.log('Select SMS - ' + Date());
-//         FindSMS();
-//     });
-// });
 
 function FindSMS(){
     // ищем список неотправленных СМСок
@@ -230,7 +246,7 @@ function ParseAnswer(answer, smska, callback) {
             isNotError = false;
             console.log(MessageResult);
             var errorMessage = '';
-            switch(String(MessageResult)) {
+            switch (String(MessageResult)) {
                   case 'OK':
                     isNotError = true;
                     errorMessage = 'Сообщение отправлено';
@@ -309,6 +325,87 @@ function ParseAnswer(answer, smska, callback) {
                         callback();
                     }
                 });
+        }
+    });
+}
+
+function UpdateBalance(callback) {
+    var formData = querystring.stringify(formBalance);
+    var contentLength = formData.length;
+
+    request({
+        headers: {
+            'Content-Length': contentLength,
+            'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        url: config.sms_url_balance,
+        body: formData,
+        method: 'POST'
+    }, function(error, response, body) {
+        if (error) {
+            var errorMessage = 'Can not perform request to the SMS service: '+error;
+            console.log(errorMessage);
+            callback(errorMessage);
+        } else {
+            // console.log('Balance Answer: ');
+            // console.log(response);
+            // console.log(body);
+            if (response.statusCode===200) {
+                ParseAndSaveBalance(body, function(err) {
+                    if (err) {
+                        callback(err);
+                    }
+                    callback();
+                });
+            }
+            else {
+                var errorRequest = 'SMS service returned 404 error!';
+                callback(errorRequest);
+            }
+
+        }
+    });
+}
+
+function ParseAndSaveBalance(answer, callback) {
+    parser.parseString(answer, function (err, result) {
+        if (err) {
+            var errorMessage1 = 'Can not parse balance answer!';
+            console.log(errorMessage1);
+            console.log(err);
+            callback({result: errorMessage1});
+        } else {
+            // console.log('parser result: ');
+            // console.log(result);
+
+            var MessageResult = result['GetUserRoubleBalanceResponse']['Result'][0];
+            var RoubleBalance = result['GetUserRoubleBalanceResponse']['RoubleBalance'][0];
+            RoubleBalance = parseFloat(RoubleBalance);
+
+            if (String(MessageResult)==='OK') {
+                var new_data = {
+                    updatedAt: new Date(),
+                    balance: RoubleBalance
+                };
+
+                var new_balance = new BALANCE(new_data);
+                new_balance.save(function (err) {
+                    if (err) {
+                        var errorMessage3 = 'Can not update balance in the DB: '+err;
+                        console.log(errorMessage3);
+                        callback({result: errorMessage3});
+                    } else {
+                        console.log('Balance updated successfully');
+                        callback();
+                    }
+                });
+
+            } else {
+                var errorMessage2 = 'Get balance return error: '+MessageResult;
+                console.log(errorMessage2);
+                callback({result: errorMessage2});
+            }
+
         }
     });
 }
