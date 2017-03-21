@@ -202,7 +202,12 @@ function FindSMS(){
           }
           else {
             if (process.env.NODE_ENV === 'production') {
-                if (config.neogate_use === 'yes') {
+                console.log("config.neogate_use: "+config.neogate_use);
+                console.log(typeof config.neogate_use);
+
+                console.log("type: "+typeof);
+
+                if (config.noegate_use === 'yes') {
                   SendSMS_NeoGate(my_sms, callback);
                 } else {
                   SendSMS(my_sms, callback);
