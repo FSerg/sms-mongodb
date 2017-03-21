@@ -1,3 +1,4 @@
+process.binding('http_parser').HTTPParser = require('http-parser-js').HTTPParser;
 var async = require("async");
 var url = require("url");
 var querystring = require('querystring');
@@ -6,6 +7,7 @@ var xml2js  = require('xml2js');
 var cron = require('node-cron');
 var moment = require('moment');
 var isDBREADY = false;
+
 
 if (process.env.NODE_ENV === 'production') { var config = require('./config'); }
 else { var config = require('./config-dev'); }
@@ -109,10 +111,6 @@ mongoose.connection.on("connected", function(ref) {
   isDBREADY = true;
 });
 
-//GET method route
-// app.get('/test', passport.authenticate('bearer', { session: false }), function(req, res) {
-//     res.send({result: 'Everithing ok :)'});
-// });
 
 app.get('/balance', passport.authenticate('bearer', { session: false }), function(req, res) {
 //app.get('/balance', function(req, res) {
@@ -183,15 +181,39 @@ function FindSMS(){
     // ищем список неотправленных СМСок
     SMS.find({isSent: false}, function (err, finded_sms, count ){
         async.eachSeries(finded_sms, function(my_sms, callback) {
+          // tel naumber validation
+          var destNumber = my_sms.tel.replace(/[^0-9]/gim, '');
+          var re = /^7[0-9]{10,10}$/g;
+          var isTelOK = re.exec(destNumber);
+          if (!isTelOK) {
+            // stop SMS sending
+            console.log('Incorrect tel number: '+my_sms.tel);
+            console.log('Incorrect tel destNumber: '+destNumber);
 
+            var infoMessage = 'Ошибка при отравке СМС: '+my_sms.text+'\n\n'+
+                              'Некорректный номер: '+destNumber+'\n'+
+                              'Предв.запись: '+my_sms.doc_number+' от '+my_sms.doc_date;
+            var sendUrl = config.telegram_url+encodeURIComponent(infoMessage);
+            // send information to Telegram
+            request.get(sendUrl);
+
+            var errorMessage = 'Некорректный номер';
+            SaveAndUpdateSMS(my_sms, isTelOK, errorMessage, callback);
+          }
+          else {
             if (process.env.NODE_ENV === 'production') {
-                SendSMS(my_sms, callback);
+                if (config.neogate_use) {
+                  SendSMS_NeoGate(my_sms, callback);
+                } else {
+                  SendSMS(my_sms, callback);
+                }
             }
             else {
                 // for debugging
                 console.log('ready to send sms - ' + my_sms._id);
                 callback();
             }
+          }
 
         }, function(err) {
             // if any of the file processing produced an error, err would equal that error
@@ -201,7 +223,7 @@ function FindSMS(){
                 console.log('Error: ');
                 console.log(err);
             } else {
-                console.log('All sms processed successfully');
+                console.log('All sms processed');
             }
             //console.log('done!');
         });
@@ -209,7 +231,6 @@ function FindSMS(){
 }
 
 function SendSMS(smska, callback) {
-
     form.text = smska.text;
     form.destNumber = smska.tel.replace(/[^0-9]/gim, '');
     var formData2 = querystring.stringify(form);
@@ -229,6 +250,57 @@ function SendSMS(smska, callback) {
             callback();
         } else {
             ParseAnswer(body, smska, callback);
+        }
+    });
+}
+
+function SendSMS_NeoGate(smska, callback) {
+    var text = smska.text;
+    var destNumber = smska.tel.replace(/[^0-9]/gim, '');
+
+    var isNotError = false;
+    var errorMessage = '';
+
+    text = encodeURIComponent(text);
+    destNumber = encodeURIComponent(destNumber);
+    var link = config.noegate_host + '/cgi/WebCGI?1500101=account='+config.neogate_account+
+               '&password='+config.neogate_password+
+               '&port=1&destination=%2B'+destNumber+'&content='+text;
+
+    var options = {
+        encoding: null,
+        method: 'GET',
+        uri: link
+    };
+    request.get(link, function(error, response, body) {
+        if (error) {
+            console.log('Can not perform request to NeoGate: ');
+            console.log(error);
+            errorMessage = 'Ошибка отправки запроса на СМС-шлюз NeoGate';
+            SaveAndUpdateSMS(smska, isNotError, errorMessage, callback);
+        } else {
+
+            // checking the result of sending
+            if (body.search(/Success/g) != -1) {
+                // console.log('Успех!');
+                isNotError = true;
+                errorMessage = 'Сообщение отправлено';
+            } else {
+                var answer = body.match(/Message: (.*)/);
+                if (answer && answer.length>0) {
+                    answer = answer[1];
+                    console.log('Ошибка: ');
+                    console.log(answer);
+                    errorMessage = 'Ошибка на СМС-шлюзе NeoGate';
+                } else {
+                    console.log('Ошибка: ');
+                    console.log('Неизвестная ошибка СМС-шлюза NeoGate!');
+                    errorMessage = 'Неизвестная ошибка СМС-шлюза NeoGate!';
+                }
+
+            }
+
+            SaveAndUpdateSMS(smska, isNotError, errorMessage, callback);
         }
     });
 }
@@ -309,24 +381,26 @@ function ParseAnswer(answer, smska, callback) {
                 }
 
                 console.log('SMS MessageID = ' + MessageID + ' - ' + errorMessage);
-
-                //change 'Status' to True
-                smska.isSent = true;
-                smska.isOK = isNotError;
-                smska.answer = errorMessage;
-                smska.sentAt = new Date();
-                smska.save(function (err) {
-                    if (err) {
-                        console.log('Can not update SMSinfo in the DB');
-                        console.log(err);
-                        callback();
-                    } else {
-                        console.log('Sms processed successfully');
-                        callback();
-                    }
-                });
+                SaveAndUpdateSMS(smska, isNotError, errorMessage, callback);
         }
     });
+}
+
+function SaveAndUpdateSMS(smska, isNotError, errorMessage, callback) {
+  smska.isSent = true;
+  smska.isOK = isNotError;
+  smska.answer = errorMessage;
+  smska.sentAt = new Date();
+  smska.save(function (err) {
+      if (err) {
+          console.log('Can not update SMSinfo in the DB');
+          console.log(err);
+          callback();
+      } else {
+          console.log('Sms processed successfully');
+          callback();
+      }
+  });
 }
 
 function UpdateBalance(callback) {
