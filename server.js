@@ -8,9 +8,10 @@ var cron = require('node-cron');
 var moment = require('moment');
 var isDBREADY = false;
 
-
-if (process.env.NODE_ENV === 'production') { var config = require('./config'); }
-else { var config = require('./config-dev'); }
+var config = require('./config-dev');
+if (process.env.NODE_ENV === 'production') {
+  config = require('./config');
+}
 
 var passport = require('passport');
 var Strategy = require('passport-http-bearer').Strategy;
