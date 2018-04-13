@@ -8,9 +8,12 @@ var cron = require('node-cron');
 var moment = require('moment');
 var isDBREADY = false;
 
-var config = require('./config-dev');
+var config = {};
 if (process.env.NODE_ENV === 'production') {
   config = require('./config');
+}
+else {
+  config = require('./config-dev');
 }
 
 var passport = require('passport');
